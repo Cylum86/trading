@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Wealth Charts Order Processor</title>
+    <style>
+        body {
+            font-family: sans-serif;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            overflow: auto;
+            border: 1px solid #ccc;
+            padding: 5px;
+            white-space: pre;
+            resize: vertical;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        table {
+            width: auto; /* Key change: width: auto */
+            border-collapse: collapse;
+            margin-top: 20px;
+            table-layout: fixed; /* Added table-layout: fixed */
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+            overflow: hidden; /* Prevent content from overflowing */
+            text-overflow: ellipsis; /* Add ellipsis for overflowed text */
+            white-space: nowrap; /* Prevent line breaks within cells */
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Wealth Charts Order Processor</h1>
+
+    <input type="file" id="csvFileInput" accept=".csv">
+
+    <h2>Processed Data:</h2>
+    <textarea id="output1" readonly></textarea>
+
+    <h2>Processed Data (Unix, Price, Qty Only):</h2>
+    <textarea id="output2" readonly></textarea>
+    <button id="copyButton">Copy Unix, Price, Qty</button>
+
+    <h2>Position Table:</h2>
+    <table id="positionTable"></table>
+
+    <script>
+        function processCSV(csvData) {
+            if (typeof csvData !== 'string' || csvData.trim() === "") {
+                console.error("Invalid CSV data provided.");
+                return null;
+            }
+
+            const lines = csvData.trim().split('\n');
+            const nonEmptyLines = lines.filter(line => line.trim() !== "");
+            if (nonEmptyLines.length === 0) return [];
+
+            const header = nonEmptyLines[0].split(',').map(item => item.trim());
+            const dataRows = nonEmptyLines.slice(1);
+
+            const requiredColumns = ["chartSymbol", "last_time", "price_done", "qty_done"];
+            const requiredIndices = requiredColumns.map(col => header.indexOf(col));
+
+            if (requiredIndices.some(index => index === -1)) {
+                const missingColumns = requiredColumns.filter((col, index) => requiredIndices[index] === -1).join(", ");
+                return `Error: Not all required columns found in CSV. Missing: ${missingColumns}`;
+            }
+
+            const processedHeader = ["chartSymbol", "last_time", "unix", "price_done", "qty_done"];
+            const processedData = [processedHeader];
+
+            for (const row of dataRows) {
+                const values = row.split(',').map(item => item.trim());
+                const qtyDoneIndex = header.indexOf("qty_done");
+                if (qtyDoneIndex !== -1 && values[qtyDoneIndex] === "0") {
+                    continue;
+                }
+
+                const lastTimeIndex = header.indexOf("last_time");
+                let unixTimestamp = "";
+
+                if (lastTimeIndex !== -1) {
+                    const lastTimeValue = values[lastTimeIndex];
+                    const dateObject = new Date(lastTimeValue);
+                    if (!isNaN(dateObject)) {
+                        unixTimestamp = Math.floor(dateObject.getTime() / 1000);
+                    } else {
+                        unixTimestamp = "Invalid Date";
+                        console.error(`Invalid date format: ${lastTimeValue}`);
+                    }
+                }
+
+                const processedRow = [
+                    values[requiredIndices[0]],
+                    values[requiredIndices[1]],
+                    unixTimestamp,
+                    values[requiredIndices[2]],
+                    values[requiredIndices[3]]
+                ];
+                processedData.push(processedRow);
+            }
+
+            return processedData;
+        }
+
+        function handleFileSelect(evt) {
+            const file = evt.target.files[0];
+            const outputDiv1 = document.getElementById('output1');
+            const outputDiv2 = document.getElementById('output2');
+            const positionTable = document.getElementById('positionTable');
+            outputDiv1.value = "";
+            outputDiv2.value = "";
+            positionTable.innerHTML = "";
+
+            if (file) {
+                const reader = new FileReader();
+
+                reader.onload = (e) => {
+                    const csvText = e.target.result;
+
+                    function updateOutput() {
+                        const processedData = processCSV(csvText);
+
+                        if (typeof processedData === 'string') {
+                            outputDiv1.value = processedData;
+                            outputDiv2.value = "";
+                            return;
+                        } else if (processedData) {
+                            let outputText1 = "";
+                            let outputText2 = "";
+                            let tableRows = [];
+                            let cumulativeQty = 0;
+
+                            const chartSymbolIndex = processedData[0].indexOf("chartSymbol");
+                            const lastTimeIndex = processedData[0].indexOf("last_time");
+                            const unixIndex = processedData[0].indexOf("unix");
+                            const priceIndex = processedData[0].indexOf("price_done");
+                            const qtyIndex = processedData[0].indexOf("qty_done");
+
+                            processedData.forEach((row, index) => {
+                                outputText1 += row.join(",") + "\n";
+                                if (index > 0) {
+                                    outputText2 += `${row[unixIndex]},${row[priceIndex]},${row[qtyIndex]}\n`;
+
+                                    const timeValue = row[1];
+                                    let timeFormatted = "";
+                                    if(timeValue !== "Invalid Date"){
+                                        const dateObject = new Date(timeValue);
+                                        const hours = dateObject.getHours().toString().padStart(2, '0');
+                                        const minutes = dateObject.getMinutes().toString().padStart(2, '0');
+                                        timeFormatted = `${hours}:${minutes}`;
+                                    } else {
+                                        timeFormatted = timeValue;
+                                    }
+                                    cumulativeQty += parseInt(row[qtyIndex]) || 0;
+                                    tableRows.push([row[chartSymbolIndex], timeFormatted, row[priceIndex], row[qtyIndex], cumulativeQty]);
+                                }
+                            });
+
+                            outputDiv1.value = outputText1;
+                            outputDiv2.value = outputText2;
+
+                            const tableHeader = ["chartSymbol", "time", "price_done", "qty_done", "position"];
+                            let tableHTML = "<tr>";
+                            tableHeader.forEach(headerText => {
+                                tableHTML += `<th>${headerText}</th>`;
+                            });
+                            tableHTML += "</tr>";
+
+                            tableRows.forEach(rowData => {
+                                tableHTML += "<tr>";
+                                rowData.forEach(cellData => {
+                                    tableHTML += `<td>${cellData}</td>`;
+                                });
+                                tableHTML += "</tr>";
+                            });
+
+                            positionTable.innerHTML = tableHTML;
+                        } else {
+                            outputDiv1.value = "No data to display.";
+                            outputDiv2.value = "";
+                            positionTable.innerHTML = ""; // Clear table on error too
+                        }
+                    }
+
+                    updateOutput();
+                };
+
+                reader.onerror = (e) => {
+                    console.error("Error reading file", e);
+                    outputDiv1.value = "Error reading the file.";
+                    outputDiv2.value = "";
+                    positionTable.innerHTML = ""; // Clear table on error too
+                };
+
+                reader.readAsText(file);
+            }
+        }
+
+        const copyButton = document.getElementById('copyButton');
+        copyButton.addEventListener('click', () => {
+            const output2 = document.getElementById('output2');
+            output2.select();
+            navigator.clipboard.writeText(output2.value)
+                .then(() => {
+                    alert("Data copied to clipboard!");
+                })
+                .catch(err => {
+                    console.error('Failed to copy: ', err);
+                    alert("Copy failed. Please try again.");
+                });
+        });
+
+        document.getElementById('csvFileInput').addEventListener('change', handleFileSelect, false);
+    </script>
+
+</body>
+</html>

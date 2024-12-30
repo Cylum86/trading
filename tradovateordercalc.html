@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tradovate Order Calculator</title>
+    <style>
+        body {
+            font-family: sans-serif;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            margin-top: 20px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        button {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Tradovate Order Calculator</h1>
+
+    <input type="file" id="csvFileInput" accept=".csv">
+
+    <h2>Processed Data:</h2>
+    <table id="csvTable"></table>
+
+    <h2>Unix Time, Avg Fill Price, Quantity:</h2>
+    <textarea id="unixData" readonly></textarea>
+    <button id="copyButton">Copy to Clipboard</button>
+
+    <script>
+        function processCSV(csvData) {
+            if (!csvData || csvData.trim() === "") return { header: [], dataRows: [], unixData: [] };
+
+            const lines = csvData.trim().split('\n').filter(line => line.trim() !== "");
+            if (lines.length <= 1) return { header: [], dataRows: [], unixData: [] };
+
+            const header = lines[0].split(',').map(item => item.trim());
+            const dataRows = lines.slice(1).map(line => line.split(',').map(item => item.trim()));
+
+            const displayedColumns = ["Contract", "Fill Time", "Avg Fill Price", "Quantity", "Position"];
+            const allDesiredColumns = ["Contract", "Fill Time", "Avg Fill Price", "B/S", "Quantity"];
+
+            const newDataRows = [];
+            const unixData = [];
+            let position = 0;
+
+            for (const row of dataRows) {
+                let hasAllData = true;
+
+                for (const col of allDesiredColumns) {
+                    const index = header.indexOf(col);
+                    if (index === -1 || index >= row.length || row[index] === "") {
+                        hasAllData = false;
+                        break;
+                    }
+                }
+
+                if (!hasAllData) continue;
+
+                const newRow = [];
+                const bsIndex = header.indexOf("B/S");
+                const qtyIndex = header.indexOf("Quantity");
+                const fillTimeIndex = header.indexOf("Fill Time");
+                const avgPriceIndex = header.indexOf("Avg Fill Price");
+                let quantity = parseFloat(row[qtyIndex]) || 0;
+                let avgFillPrice = parseFloat(row[avgPriceIndex]) || 0;
+
+                if (row[bsIndex] === "Sell") {
+                    quantity = -Math.abs(quantity);
+                }
+
+                const rowPosition = position;
+                position += quantity;
+
+                let unixTimestamp = "";
+                if (fillTimeIndex !== -1 && row[fillTimeIndex]) {
+                    try {
+                        const date = new Date(row[fillTimeIndex]);
+                        if (!isNaN(date)) {
+                            unixTimestamp = Math.floor(date.getTime() / 1000);
+                        } else {
+                          unixTimestamp = "Invalid Date";
+                        }
+                    } catch (error) {
+                        unixTimestamp = "Parsing Error";
+                    }
+                }
+                unixData.push(`${unixTimestamp},${avgFillPrice},${quantity}`);
+
+                for (const colName of displayedColumns) {
+                    let valueToPush = "";
+                    const colIndex = header.indexOf(colName);
+
+                    if (colName === "Quantity") {
+                        valueToPush = quantity;
+                    } else if (colName === "Position") {
+                        valueToPush = rowPosition;
+                    } else if (colIndex !== -1) {
+                        valueToPush = row[colIndex];
+                    }
+                    newRow.push(valueToPush);
+                }
+                newDataRows.push(newRow);
+            }
+
+            return { header: displayedColumns, dataRows: newDataRows, unixData: unixData };
+        }
+
+        function displayTable(data) {
+            const table = document.getElementById('csvTable');
+            table.innerHTML = "";
+
+            if (!data || !data.header || !data.dataRows || data.header.length === 0 || data.dataRows.length === 0) {
+                table.innerHTML = "<tr><td colspan='100%'>No data to display or invalid CSV format/missing columns.</td></tr>";
+                document.getElementById("unixData").value = "";
+                return;
+            }
+
+            let tableHTML = "<tr>";
+            data.header.forEach(headerText => {
+                tableHTML += `<th>${headerText}</th>`;
+            });
+            tableHTML += "</tr>";
+
+            data.dataRows.forEach(row => {
+                tableHTML += "<tr>";
+                row.forEach(cellData => {
+                    tableHTML += `<td>${cellData}</td>`;
+                });
+                tableHTML += "</tr>";
+            });
+
+            table.innerHTML = tableHTML;
+            document.getElementById("unixData").value = data.unixData.join('\n');
+        }
+
+        document.getElementById('copyButton').addEventListener('click', function() {
+            const textArea = document.getElementById("unixData");
+            textArea.select();
+            textArea.setSelectionRange(0, 99999);
+
+            try {
+                navigator.clipboard.writeText(textArea.value);
+                alert("Data copied to clipboard!");
+            } catch (err) {
+                console.error('Failed to copy: ', err);
+                alert("Copy to clipboard failed. Please copy manually.");
+            }
+        });
+
+        document.getElementById('csvFileInput').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+
+            if (file) {
+                const reader = new FileReader();
+
+                reader.onload = function(e) {
+                    const csvText = e.target.result;
+                    const csvData = processCSV(csvText);
+                    displayTable(csvData);
+                };
+
+                reader.onerror = function() {
+                    alert('Unable to read ' + file.name);
+                };
+
+                reader.readAsText(file);
+            }
+        });
+    </script>
+
+</body>
+</html>
