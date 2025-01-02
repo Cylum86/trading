@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project X Order Processor</title>
+    <style>
+        body {
+            font-family: sans-serif;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            margin-top: 20px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        button {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Project X Order Processor</h1>
+
+    <input type="file" id="csvFileInput" accept=".csv">
+
+    <h2>Processed Data:</h2>
+    <table id="csvTable"></table>
+
+    <h2>Unix, ExecutePrice, Qty:</h2>
+    <textarea id="unixData" readonly></textarea>
+    <button id="copyButton">Copy to Clipboard</button>
+
+    <script>
+        function processCSV(csvData) {
+            if (!csvData || csvData.trim() === "") return { header: [], dataRows: [], unixOutput: [] };
+
+            const lines = csvData.trim().split('\n').filter(line => line.trim() !== "");
+            if (lines.length <= 1) return { header: [], dataRows: [], unixOutput: [] };
+
+            const header = lines[0].split(',').map(item => item.trim());
+            const dataRows = lines.slice(1).map(line => line.split(',').map(item => item.trim()));
+
+            const displayedColumns = ["FilledAt", "ExecutePrice", "Qty", "Position", "Unix"];
+            const allDesiredColumns = ["Size", "Side", "FilledAt", "ExecutePrice"];
+            let unixOutput = [];
+
+            const newDataRows = [];
+            let position = 0;
+            let rowNumber = 1; // Initialize row number
+
+            for (const row of dataRows) {
+                let hasAllData = true;
+                for (const col of allDesiredColumns) {
+                    const index = header.indexOf(col);
+                    if (index === -1 || index >= row.length || (row[index] === "" && col === "FilledAt")) {
+                        hasAllData = false;
+                        break;
+                    }
+                }
+
+                if (!hasAllData) continue;
+
+                const newRow = [];
+                const sizeIndex = header.indexOf("Size");
+                const sideIndex = header.indexOf("Side");
+                const filledAtIndex = header.indexOf("FilledAt");
+                const executePriceIndex = header.indexOf("ExecutePrice");
+
+                const filledAtValue = row[filledAtIndex];
+                let qty = parseFloat(row[sizeIndex]) || 0;
+                if (row[sideIndex].toLowerCase() === "ask") {
+                    qty = -Math.abs(qty);
+                }
+
+                position += qty;
+
+                let unixTimestamp = "";
+                if (filledAtValue) {
+                    try {
+                        const date = new Date(filledAtValue);
+                        if (!isNaN(date)) {
+                            unixTimestamp = Math.floor(date.getTime() / 1000);
+                        } else {
+                            console.error("Invalid Date Format:", filledAtValue);
+                            unixTimestamp = "Invalid Date";
+                        }
+                    } catch (error) {
+                        console.error("Date Parsing Error:", error, filledAtValue);
+                        unixTimestamp = "Parsing Error";
+                    }
+                }
+
+                let executePrice = parseFloat(row[executePriceIndex]) || 0;
+                executePrice = executePrice.toFixed(2);
+                unixOutput.push(`${unixTimestamp},${executePrice},${qty}`);
+                for (const colName of displayedColumns) {
+                    let valueToPush = "";
+                    if (colName === "FilledAt") {
+                        valueToPush = filledAtValue;
+                    } else if (colName === "ExecutePrice") {
+                        valueToPush = executePrice;
+                    } else if (colName === "Qty") {
+                        valueToPush = qty;
+                    } else if (colName === "Position") {
+                        valueToPush = position;
+                    } else if (colName === "Unix") {
+                        valueToPush = unixTimestamp;
+                    }
+                    newRow.push(valueToPush);
+                }
+                newDataRows.push(newRow);
+                rowNumber++; // Increment row number for next row
+            }
+
+            return { header: displayedColumns, dataRows: newDataRows, unixOutput: unixOutput };
+        }
+
+        function displayTable(data) {
+            const table = document.getElementById('csvTable');
+            table.innerHTML = "";
+            document.getElementById("unixData").value = "";
+
+            if (!data || !data.header || !data.dataRows || data.header.length === 0 || data.dataRows.length === 0) {
+                table.innerHTML = "<tr><td colspan='100%'>No data to display or invalid CSV format/missing columns.</td></tr>";
+                return;
+            }
+
+            let tableHTML = "<tr>";
+            data.header.forEach(headerText => {
+                tableHTML += `<th>${headerText}</th>`;
+            });
+            tableHTML += "</tr>";
+
+            data.dataRows.forEach(row => {
+                tableHTML += "<tr>";
+                row.forEach(cellData => {
+                    tableHTML += `<td>${cellData}</td>`;
+                });
+                tableHTML += "</tr>";
+            });
+
+            table.innerHTML = tableHTML;
+            document.getElementById("unixData").value = data.unixOutput.join('\n');
+        }
+
+        document.getElementById('copyButton').addEventListener('click', function() {
+            const textArea = document.getElementById("unixData");
+            textArea.select();
+            textArea.setSelectionRange(0, 99999);
+            try {
+                navigator.clipboard.writeText(textArea.value);
+                alert("Data copied to clipboard!");
+            } catch (err) {
+                console.error('Failed to copy: ', err);
+                alert("Copy to clipboard failed. Please copy manually.");
+            }
+        });
+
+        document.getElementById('csvFileInput').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+
+            if (file) {
+                const reader = new FileReader();
+
+                reader.onload = function(e) {
+                    const csvText = e.target.result;
+                    const csvData = processCSV(csvText);
+                    displayTable(csvData);
+                };
+
+                reader.onerror = function() {
+                    alert('Unable to read ' + file.name);
+                };
+
+                reader.readAsText(file);
+            }
+        });
+    </script>
+
+</body>
+</html>
